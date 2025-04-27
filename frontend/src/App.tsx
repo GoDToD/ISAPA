@@ -91,7 +91,7 @@ function App() {
       backgroundColor: "#f9f9f9",
       fontFamily: "Arial, sans-serif"
     }}>
-      <h2 style={{ marginBottom: "20px" }}>🦙 <span style={{ fontWeight: "bold" }}>Chat with LLaMA</span></h2>
+      <h2 style={{ marginBottom: "20px" }}> <span style={{ fontWeight: "bold" }}>Chat with Assistant</span></h2>
 
       {docMode && (
         <div style={{
