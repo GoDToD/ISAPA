@@ -9,6 +9,7 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [docMode, setDocMode] = useState(false); // ✅ 是否开启文档问答模式
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const handleSend = async () => {
@@ -47,10 +48,23 @@ function App() {
       await axios.post("http://localhost:5000/api/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" }
       });
-      alert("File uploaded successfully!");
+      alert("File uploaded and processed successfully!");
+      setDocMode(true); // ✅ 文件上传成功后，启用文档模式
     } catch (error) {
       console.error(error);
       alert("Upload failed.");
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      await axios.post("http://localhost:5000/api/reset");
+      setMessages([]);
+      setDocMode(false);
+      alert("Chat history and uploaded documents cleared!");
+    } catch (error) {
+      console.error(error);
+      alert("Reset failed.");
     }
   };
 
@@ -78,6 +92,19 @@ function App() {
       fontFamily: "Arial, sans-serif"
     }}>
       <h2 style={{ marginBottom: "20px" }}>🦙 <span style={{ fontWeight: "bold" }}>Chat with LLaMA</span></h2>
+
+      {docMode && (
+        <div style={{
+          backgroundColor: "#e0f7fa",
+          color: "#006064",
+          padding: "10px 20px",
+          borderRadius: "8px",
+          marginBottom: "10px",
+          fontWeight: "bold"
+        }}>
+          📄 Document Q&A Mode Active
+        </div>
+      )}
 
       <div
         ref={chatContainerRef}
@@ -115,7 +142,7 @@ function App() {
         }}
       />
 
-      <div style={{ width: "100%", maxWidth: "800px", display: "flex", gap: "10px" }}>
+      <div style={{ width: "100%", maxWidth: "800px", display: "flex", gap: "10px", marginBottom: "10px" }}>
         <button
           onClick={handleSend}
           disabled={loading}
@@ -133,6 +160,23 @@ function App() {
         </button>
 
         <FileUploader onUpload={handleUpload} />
+      </div>
+
+      <div style={{ width: "100%", maxWidth: "800px" }}>
+        <button
+          onClick={handleReset}
+          style={{
+            width: "100%",
+            padding: "10px",
+            borderRadius: "8px",
+            border: "1px solid #ccc",
+            backgroundColor: "#f44336",
+            color: "white",
+            cursor: "pointer"
+          }}
+        >
+          🔄 Clear Chat & Documents
+        </button>
       </div>
     </div>
   );

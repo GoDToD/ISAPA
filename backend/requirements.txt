@@ -4,3 +4,7 @@ transformers
 torch
 accelerate
 bitsandbytes
+pdfplumber
+python-docx
+sentence-transformers
+faiss-cpu
