@@ -8,6 +8,7 @@ from docx import Document
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -18,7 +19,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # ==== 加载大模型（4bit量化） ====
 bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
 
-model_path = "C:/Qwen2.5_8B_chat_dpo_finetune"  # 🚨 修改为你的实际合并后模型路径！
+model_path = "C:/Qwen2.5_8B_chat_dpo_finetune"  # 🚨 修改成你自己的合并后模型路径！
 
 tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(
@@ -30,17 +31,14 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 model.eval()
 
-# ==== 加载 SentenceTransformer 用于向量化 ====
-embedder = SentenceTransformer("all-MiniLM-L6-v2")  # 很轻量，快且准确
+# ==== 加载 SentenceTransformer 生成向量 ====
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-# ==== 文档和知识库变量 ====
-doc_chunks = []
-doc_index = None
+# ==== 文档/知识库/QA知识块变量 ====
+doc_chunks, study_abroad_chunks, qa_chunks = [], [], []
+doc_index, study_abroad_index, qa_index = None, None, None
 
-study_abroad_chunks = []
-study_abroad_index = None
-
-# ==== 文档处理工具 ====
+# ==== 文档处理 ====
 def extract_text_from_pdf(filepath):
     with pdfplumber.open(filepath) as pdf:
         text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
@@ -70,7 +68,7 @@ def split_text(text, chunk_size=300):
 def build_faiss_index(chunks):
     embeddings = embedder.encode(chunks, normalize_embeddings=True)
     dim = embeddings.shape[1]
-    index = faiss.IndexFlatIP(dim)  # 余弦相似度检索
+    index = faiss.IndexFlatIP(dim)
     index.add(embeddings)
     return index
 
@@ -93,23 +91,38 @@ Question:
 Answer:"""
     return rag_prompt
 
-# ==== 加载内置留学知识库 ====
+# ==== 加载留学百科 ====
 def load_study_abroad_knowledge(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
     return split_text(content)
 
-# ==== 加载留学知识库并建索引 ====
-study_abroad_chunks = load_study_abroad_knowledge("./data/uk_study_guide.txt")  # 📄留学文档路径
+# ==== 加载留学QA数据集 ====
+def load_qa_dataset(file_path):
+    chunks = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            item = json.loads(line)
+            prompt = item.get("prompt", "").strip()
+            completion = item.get("completion", "").strip()
+            if prompt and completion:
+                combined = f"Q: {prompt}\nA: {completion}"
+                chunks.append(combined)
+    return chunks
+
+# ==== 初始化阶段：加载内置资料 ====
+study_abroad_chunks = load_study_abroad_knowledge("./data/uk_study_guide.txt")
 study_abroad_index = build_faiss_index(study_abroad_chunks)
 
-# ==== 聊天历史缓存（可选）
+qa_chunks = load_qa_dataset("./data/reconverted_prompt_completion.jsonl")
+qa_index = build_faiss_index(qa_chunks)
+
 chat_history = []
 
 # ==== 聊天接口 ====
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    global chat_history, doc_chunks, doc_index, study_abroad_chunks, study_abroad_index
+    global chat_history, doc_chunks, doc_index, study_abroad_chunks, study_abroad_index, qa_chunks, qa_index
     data = request.json
     user_prompt = data.get('prompt', '')
 
@@ -117,20 +130,24 @@ def chat():
 
     relevant_chunks = []
 
-    # 优先文档检索
+    # 检索文档
     if doc_chunks and doc_index:
         relevant_chunks += dense_retrieve(doc_index, doc_chunks, user_prompt, top_k=2)
 
-    # 留学知识库检索
+    # 检索留学资料
     if study_abroad_chunks and study_abroad_index:
         relevant_chunks += dense_retrieve(study_abroad_index, study_abroad_chunks, user_prompt, top_k=2)
 
+    # 检索QA数据集
+    if qa_chunks and qa_index:
+        relevant_chunks += dense_retrieve(qa_index, qa_chunks, user_prompt, top_k=2)
+
     if relevant_chunks:
-        # 有相关内容，走RAG模式
+        # 用RAG prompt
         rag_prompt = build_rag_prompt(relevant_chunks, user_prompt)
         messages = [system_prompt, {"role": "user", "content": rag_prompt}]
     else:
-        # 没有文档，只走普通对话
+        # 没有相关内容，普通聊天
         chat_history.append({"role": "user", "content": user_prompt})
         messages = [system_prompt] + chat_history
 
@@ -174,7 +191,7 @@ def upload_file():
     save_path = os.path.join(UPLOAD_FOLDER, file.filename)
     file.save(save_path)
 
-    # 解析
+    # 解析文档
     if file.filename.endswith('.pdf'):
         text = extract_text_from_pdf(save_path)
     elif file.filename.endswith('.docx'):
@@ -182,13 +199,12 @@ def upload_file():
     else:
         return jsonify({"error": "Unsupported file format."}), 400
 
-    # 切分+向量化
     doc_chunks = split_text(text)
     doc_index = build_faiss_index(doc_chunks)
 
     return jsonify({"message": f"File {file.filename} uploaded and processed successfully!"})
 
-# ==== 清空聊天和上传文档接口 ====
+# ==== 清空聊天和文档接口 ====
 @app.route('/api/reset', methods=['POST'])
 def reset_chat():
     global chat_history, doc_chunks, doc_index
