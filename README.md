@@ -59,7 +59,7 @@ study-abroad-rag-system/
 │   ├── uploads/
 │   ├── data/
 │   │   ├── uk_study_guide.txt
-│   │   └── study_abroad_qa.jsonl
+│   │   └── reconverted_prompt_completion.jsonl
 ├── frontend/
 │   ├── package.json
 │   ├── tsconfig.json
