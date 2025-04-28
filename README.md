@@ -51,24 +51,24 @@ This project is a document-augmented question answering system combining a React
 ```plaintext
 study-abroad-rag-system/
 ├── README.md
-├── LICENSE
 ├── .gitignore
 ├── backend/
 │   ├── app.py
 │   ├── requirements.txt
 │   ├── uploads/
+│   ├── model/
 │   ├── data/
 │   │   ├── uk_study_guide.txt
 │   │   └── reconverted_prompt_completion.jsonl
-├── frontend/
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── src/
-│   │   ├── App.tsx
-│   │   ├── components/
-│   │   ├── types/
-│   └── public/
-└── docs/ (optional)
+└── frontend/
+    ├── package.json
+    ├── tsconfig.json
+    ├── src/
+    │   ├── App.tsx
+    │   ├── components/
+    │   ├── types/
+    └── public/
+
 ```
 
 ---
@@ -94,7 +94,7 @@ python -m venv env
 ### Download and unzip fine-tuned model through the link
   https://drive.google.com/file/d/1Uoqp8Kkkvt7yuxJOq6qbZB7GiBJfuDF8/view?usp=drive_link
 
-  then put it in backend/data folder.
+  then put it in backend/model folder.
 
 Activate the virtual environment:
 
