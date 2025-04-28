@@ -19,7 +19,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # ==== 加载大模型（4bit量化） ====
 bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
 
-model_path = "C:/Qwen2.5_8B_chat_dpo_finetune"  # 🚨 修改成你自己的合并后模型路径！
+model_path = "./model/qwen2.5_chat_sft_finetune"  # 🚨 修改成你自己的合并后模型路径！
 
 tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(
