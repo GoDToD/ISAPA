@@ -145,7 +145,7 @@ The React frontend will be available at `http://localhost:5173/`.
 Make sure the following knowledge files are placed under `backend/data/`:
 
 - `uk_study_guide.txt` — Study abroad encyclopedia
-- `study_abroad_qa.jsonl` — Study abroad QA dataset
+- `reconverted_prompt_completion.jsonl` — Study abroad QA dataset
 
 These files are preloaded automatically when the backend starts.
 
@@ -164,26 +164,3 @@ These files are preloaded automatically when the backend starts.
 - **User-Uploaded Documents** (PDF/Word)
 - **Study Abroad Encyclopedia** (`uk_study_guide.txt`)
 - **Study Abroad QA Dataset** (`study_abroad_qa.jsonl`)
-
----
-
-## 📈 Future Improvements (Optional)
-
-- Implement streaming responses (real-time token-by-token generation)
-- Display document management (uploaded files list)
-- Highlight retrieval source for each answer (document/encyclopedia/QA)
-- Support multi-document upload and management
-- Enhance frontend UI/UX
-- Optional Docker deployment
-
----
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
----
-
-## 📩 Contact
-
-If you have any questions, feel free to open an issue or contact the project maintainer.
