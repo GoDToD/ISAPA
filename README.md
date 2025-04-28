@@ -80,8 +80,8 @@ This guide provides step-by-step instructions to set up and run the Study Abroad
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourname/study-abroad-rag-system.git
-cd study-abroad-rag-system
+git clone https://github.com/GoDToD/ISAPA.git
+cd ISAPA
 ```
 
 ### 2. Set Up the Backend (Flask)
