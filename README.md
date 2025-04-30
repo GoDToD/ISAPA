@@ -92,7 +92,7 @@ python -m venv env
 ```
 
 ### Download and unzip fine-tuned model through the link
-  https://drive.google.com/file/d/1Uoqp8Kkkvt7yuxJOq6qbZB7GiBJfuDF8/view?usp=drive_link
+  https://drive.google.com/file/d/1WS0EvoqH2-_glmy8LkwcTHG_iayEa3kg/view?usp=drive_link
 
   then put it in backend/model folder.
 
