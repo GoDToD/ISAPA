@@ -9,7 +9,7 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-  const [docMode, setDocMode] = useState(false); // ✅ 是否开启文档问答模式
+  const [docMode, setDocMode] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const handleSend = async () => {
@@ -49,7 +49,7 @@ function App() {
         headers: { "Content-Type": "multipart/form-data" }
       });
       alert("File uploaded and processed successfully!");
-      setDocMode(true); // ✅ 文件上传成功后，启用文档模式
+      setDocMode(true);
     } catch (error) {
       console.error(error);
       alert("Upload failed.");
@@ -122,7 +122,7 @@ function App() {
         }}
       >
         {messages.map(msg => (
-          <ChatMessageItem key={msg.id} message={msg} />
+          <ChatMessageItem key={msg.id} content={msg.content} role={msg.role} />
         ))}
       </div>
 

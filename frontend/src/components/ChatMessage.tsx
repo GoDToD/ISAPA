@@ -1,24 +1,39 @@
-import { ChatMessage } from "../types";
+// React component (e.g., inside ChatMessage.tsx or MessageBubble.tsx)
 
-interface Props {
-  message: ChatMessage;
+import React from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+interface ChatMessageProps {
+  content: string;
+  role: 'user' | 'assistant';
 }
 
-export default function ChatMessageItem({ message }: Props) {
+const ChatMessage: React.FC<ChatMessageProps> = ({ content, role }) => {
+  const isUser = role === 'user';
   return (
-    <div style={{
-      textAlign: message.role === 'user' ? 'right' : 'left',
-      margin: '10px 0'
-    }}>
-      <div style={{
-        display: 'inline-block',
-        background: message.role === 'user' ? '#DCF8C6' : '#F1F0F0',
+    <div
+      style={{
+        textAlign: isUser ? 'right' : 'left',
+        background: isUser ? '#d4f8cb' : '#f2f2f2',
         borderRadius: '8px',
-        padding: '10px',
-        maxWidth: '70%',
-      }}>
-        {message.content}
-      </div>
+        padding: '12px',
+        marginBottom: '8px',
+        maxWidth: '90%',
+        alignSelf: isUser ? 'flex-end' : 'flex-start'
+      }}
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
+          li: ({ children }) => <li style={{ marginLeft: 12 }}>{children}</li>
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
-}
+};
+
+export default ChatMessage;

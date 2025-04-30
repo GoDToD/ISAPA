@@ -14,12 +14,12 @@ app = Flask(__name__)
 CORS(app)
 
 UPLOAD_FOLDER = 'uploads'
+PROFILE_PATH = os.path.join(UPLOAD_FOLDER, "user_profile.txt")
+QA_PATH = './data/reconverted_prompt_completion.jsonl'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ==== 加载大模型（4bit量化） ====
 bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
-
-model_path = "./model/qwen2.5_chat_sft_finetune"  # 🚨 修改成你自己的合并后模型路径！
+model_path = "./model/qwen2.5_7B_Instruct_finetune"
 
 tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(
@@ -31,131 +31,106 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 model.eval()
 
-# ==== 加载 SentenceTransformer 生成向量 ====
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
+chat_history = []
 
-# ==== 文档/知识库/QA知识块变量 ====
-doc_chunks, study_abroad_chunks, qa_chunks = [], [], []
-doc_index, study_abroad_index, qa_index = None, None, None
+qa_chunks = []
+qa_answers = []
+qa_index = None
 
-# ==== 文档处理 ====
 def extract_text_from_pdf(filepath):
     with pdfplumber.open(filepath) as pdf:
-        text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
-    return text
+        return '\n'.join(page.extract_text() or '' for page in pdf.pages)
 
 def extract_text_from_docx(filepath):
     doc = Document(filepath)
-    text = '\n'.join(paragraph.text for paragraph in doc.paragraphs)
-    return text
+    return '\n'.join(paragraph.text for paragraph in doc.paragraphs)
 
-def split_text(text, chunk_size=300):
-    sentences = text.split('\n')
-    chunks = []
-    current_chunk = ""
+def build_compare_prompt(profile_text, requirement_text, user_query):
+    return f"""You are an admissions assistant. Compare the user’s background with the program requirements and determine eligibility.
 
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) <= chunk_size:
-            current_chunk += sentence + " "
-        else:
-            chunks.append(current_chunk.strip())
-            current_chunk = sentence + " "
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-    return chunks
+User Background:
+{profile_text}
 
-# ==== FAISS索引工具 ====
-def build_faiss_index(chunks):
-    embeddings = embedder.encode(chunks, normalize_embeddings=True)
-    dim = embeddings.shape[1]
-    index = faiss.IndexFlatIP(dim)
-    index.add(embeddings)
-    return index
-
-def dense_retrieve(index, chunks, query, top_k=3):
-    query_embedding = embedder.encode([query], normalize_embeddings=True)
-    D, I = index.search(query_embedding, top_k)
-    retrieved_chunks = [chunks[i] for i in I[0] if i >= 0]
-    return retrieved_chunks
-
-def build_rag_prompt(context_chunks, user_query):
-    context_text = "\n".join(context_chunks)
-    rag_prompt = f"""Based on the following context, answer the user's question.
-
-Context:
-{context_text}
+Program Requirements:
+{requirement_text}
 
 Question:
 {user_query}
 
-Answer:"""
-    return rag_prompt
+Answer:
+"""
 
-# ==== 加载留学百科 ====
-def load_study_abroad_knowledge(file_path):
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    return split_text(content)
 
-# ==== 加载留学QA数据集 ====
-def load_qa_dataset(file_path):
-    chunks = []
-    with open(file_path, "r", encoding="utf-8") as f:
+def load_qa_dataset_and_index(path):
+    global qa_chunks, qa_answers, qa_index
+    prompts, completions = [], []
+    with open(path, "r", encoding="utf-8") as f:
         for line in f:
             item = json.loads(line)
-            prompt = item.get("prompt", "").strip()
-            completion = item.get("completion", "").strip()
+            prompt, completion = item.get("prompt", "").strip(), item.get("completion", "").strip()
             if prompt and completion:
-                combined = f"Q: {prompt}\nA: {completion}"
-                chunks.append(combined)
-    return chunks
+                prompts.append(prompt)
+                completions.append(completion)
+    qa_chunks = prompts
+    qa_answers = completions
+    embeddings = embedder.encode(qa_chunks, normalize_embeddings=True)
+    qa_index = faiss.IndexFlatIP(embeddings.shape[1])
+    qa_index.add(embeddings)
 
-# ==== 初始化阶段：加载内置资料 ====
-study_abroad_chunks = load_study_abroad_knowledge("./data/uk_study_guide.txt")
-study_abroad_index = build_faiss_index(study_abroad_chunks)
 
-qa_chunks = load_qa_dataset("./data/reconverted_prompt_completion.jsonl")
-qa_index = build_faiss_index(qa_chunks)
+def retrieve_requirement_answer(query, top_k=1, threshold=0.3):
+    query_embedding = embedder.encode([query], normalize_embeddings=True)
+    D, I = qa_index.search(query_embedding, top_k)
+    score = D[0][0]
+    idx = I[0][0]
+    if score >= threshold and idx >= 0:
+        return qa_answers[idx], qa_chunks[idx], score
+    return None, None, score
 
-chat_history = []
 
-# ==== 聊天接口 ====
+@app.route('/api/upload', methods=['POST'])
+def upload_profile():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded."}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file."}), 400
+
+    save_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(save_path)
+
+    if file.filename.endswith('.pdf'):
+        text = extract_text_from_pdf(save_path)
+    elif file.filename.endswith('.docx'):
+        text = extract_text_from_docx(save_path)
+    else:
+        return jsonify({"error": "Unsupported file format."}), 400
+
+    with open(PROFILE_PATH, "w", encoding="utf-8") as f:
+        f.write(text.strip())
+    return jsonify({"message": "Profile uploaded and saved."})
+
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    global chat_history, doc_chunks, doc_index, study_abroad_chunks, study_abroad_index, qa_chunks, qa_index
+    global chat_history
     data = request.json
     user_prompt = data.get('prompt', '')
-
     system_prompt = {"role": "system", "content": "You are a helpful assistant."}
 
-    relevant_chunks = []
+    if not os.path.exists(PROFILE_PATH):
+        return jsonify({"error": "No user profile uploaded yet."}), 400
+    profile_text = open(PROFILE_PATH, encoding="utf-8").read()
 
-    # 检索文档
-    if doc_chunks and doc_index:
-        relevant_chunks += dense_retrieve(doc_index, doc_chunks, user_prompt, top_k=2)
+    requirement_text, matched_prompt, score = retrieve_requirement_answer(user_prompt)
+    if requirement_text is None:
+        return jsonify({"response": "Sorry, I couldn't find matching program requirements to compare."})
 
-    # 检索留学资料
-    if study_abroad_chunks and study_abroad_index:
-        relevant_chunks += dense_retrieve(study_abroad_index, study_abroad_chunks, user_prompt, top_k=2)
+    rag_prompt = build_compare_prompt(profile_text, requirement_text, user_prompt)
+    messages = [system_prompt, {"role": "user", "content": rag_prompt}]
 
-    # 检索QA数据集
-    if qa_chunks and qa_index:
-        relevant_chunks += dense_retrieve(qa_index, qa_chunks, user_prompt, top_k=2)
-
-    if relevant_chunks:
-        # 用RAG prompt
-        rag_prompt = build_rag_prompt(relevant_chunks, user_prompt)
-        messages = [system_prompt, {"role": "user", "content": rag_prompt}]
-    else:
-        # 没有相关内容，普通聊天
-        chat_history.append({"role": "user", "content": user_prompt})
-        messages = [system_prompt] + chat_history
-
-    input_ids = tokenizer.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        return_tensors="pt"
-    ).to(model.device)
+    input_ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(model.device)
 
     with torch.no_grad():
         outputs = model.generate(
@@ -169,50 +144,23 @@ def chat():
             eos_token_id=tokenizer.eos_token_id
         )
 
-    generated_text = tokenizer.decode(outputs[0][input_ids.shape[-1]:], skip_special_tokens=True)
-    generated_text = generated_text.strip()
+    answer = tokenizer.decode(outputs[0][input_ids.shape[-1]:], skip_special_tokens=True).strip()
+    return jsonify({
+        "response": answer,
+        "matched_prompt": matched_prompt,
+        "retrieval_score": float(score)
+    })
 
-    if not relevant_chunks:
-        chat_history.append({"role": "assistant", "content": generated_text})
 
-    return jsonify({"response": generated_text})
-
-# ==== 上传文件接口 ====
-@app.route('/api/upload', methods=['POST'])
-def upload_file():
-    global doc_chunks, doc_index
-    if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded."}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file."}), 400
-
-    save_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(save_path)
-
-    # 解析文档
-    if file.filename.endswith('.pdf'):
-        text = extract_text_from_pdf(save_path)
-    elif file.filename.endswith('.docx'):
-        text = extract_text_from_docx(save_path)
-    else:
-        return jsonify({"error": "Unsupported file format."}), 400
-
-    doc_chunks = split_text(text)
-    doc_index = build_faiss_index(doc_chunks)
-
-    return jsonify({"message": f"File {file.filename} uploaded and processed successfully!"})
-
-# ==== 清空聊天和文档接口 ====
 @app.route('/api/reset', methods=['POST'])
-def reset_chat():
-    global chat_history, doc_chunks, doc_index
+def reset_all():
+    global chat_history
     chat_history = []
-    doc_chunks = []
-    doc_index = None
-    return jsonify({"message": "Chat history and uploaded documents cleared."})
+    if os.path.exists(PROFILE_PATH):
+        os.remove(PROFILE_PATH)
+    return jsonify({"message": "Profile and chat reset."})
 
-# ==== 启动Flask应用 ====
+
 if __name__ == "__main__":
+    load_qa_dataset_and_index(QA_PATH)
     app.run(host="0.0.0.0", port=5000)
