@@ -1,3 +1,4 @@
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
@@ -15,6 +16,7 @@ CORS(app)
 
 UPLOAD_FOLDER = 'uploads'
 PROFILE_PATH = os.path.join(UPLOAD_FOLDER, "user_profile.txt")
+GUIDE_PATH = './data/uk_study_guide.txt'
 QA_PATH = './data/reconverted_prompt_completion.jsonl'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -32,11 +34,10 @@ model = AutoModelForCausalLM.from_pretrained(
 model.eval()
 
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
-chat_history = []
 
-qa_chunks = []
-qa_answers = []
-qa_index = None
+guide_chunks, guide_index = [], None
+qa_chunks, qa_answers, qa_index = [], [], None
+doc_chunks, doc_index = [], None
 
 def extract_text_from_pdf(filepath):
     with pdfplumber.open(filepath) as pdf:
@@ -44,91 +45,115 @@ def extract_text_from_pdf(filepath):
 
 def extract_text_from_docx(filepath):
     doc = Document(filepath)
-    return '\n'.join(paragraph.text for paragraph in doc.paragraphs)
+    return '\n'.join(p.text for p in doc.paragraphs)
 
-def build_compare_prompt(profile_text, requirement_text, user_query):
-    return f"""You are an admissions assistant. Compare the user’s background with the program requirements and determine eligibility.
+def split_text(text, chunk_size=300):
+    sentences = text.split('\n')
+    chunks, current = [], ''
+    for s in sentences:
+        if len(current) + len(s) < chunk_size:
+            current += s + ' '
+        else:
+            chunks.append(current.strip())
+            current = s + ' '
+    if current:
+        chunks.append(current.strip())
+    return chunks
 
-User Background:
-{profile_text}
+def build_faiss_index(chunks):
+    vecs = embedder.encode(chunks, normalize_embeddings=True)
+    index = faiss.IndexFlatIP(vecs.shape[1])
+    index.add(vecs)
+    return index
 
-Program Requirements:
-{requirement_text}
+def retrieve_with_score(index, chunks, query, top_k=2):
+    vec = embedder.encode([query], normalize_embeddings=True)
+    D, I = index.search(vec, top_k)
+    score = float(D[0][0]) if D[0][0] > 0 else 0.0
+    results = [chunks[i] for i in I[0] if i >= 0]
+    return results, score
+
+def build_prompt(chunks, query):
+    return f"""You are a helpful assistant.
+
+Context:
+{chr(10).join(chunks)}
 
 Question:
-{user_query}
+{query}
 
 Answer:
 """
 
+def load_guide():
+    global guide_chunks, guide_index
+    with open(GUIDE_PATH, encoding='utf-8') as f:
+        guide_chunks = split_text(f.read())
+        guide_index = build_faiss_index(guide_chunks)
 
-def load_qa_dataset_and_index(path):
+def load_qa():
     global qa_chunks, qa_answers, qa_index
     prompts, completions = [], []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(QA_PATH, encoding='utf-8') as f:
         for line in f:
             item = json.loads(line)
-            prompt, completion = item.get("prompt", "").strip(), item.get("completion", "").strip()
-            if prompt and completion:
-                prompts.append(prompt)
-                completions.append(completion)
-    qa_chunks = prompts
+            prompts.append(item['prompt'].strip())
+            completions.append(item['completion'].strip())
+    qa_chunks = [f"Q: {q}\nA: {a}" for q, a in zip(prompts, completions)]
     qa_answers = completions
-    embeddings = embedder.encode(qa_chunks, normalize_embeddings=True)
-    qa_index = faiss.IndexFlatIP(embeddings.shape[1])
-    qa_index.add(embeddings)
-
-
-def retrieve_requirement_answer(query, top_k=1, threshold=0.3):
-    query_embedding = embedder.encode([query], normalize_embeddings=True)
-    D, I = qa_index.search(query_embedding, top_k)
-    score = D[0][0]
-    idx = I[0][0]
-    if score >= threshold and idx >= 0:
-        return qa_answers[idx], qa_chunks[idx], score
-    return None, None, score
-
+    qa_index = build_faiss_index(prompts)
 
 @app.route('/api/upload', methods=['POST'])
-def upload_profile():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded."}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file."}), 400
-
+def upload_file():
+    global doc_chunks, doc_index
+    file = request.files.get('file')
+    if not file:
+        return jsonify({"error": "no file"}), 400
     save_path = os.path.join(UPLOAD_FOLDER, file.filename)
     file.save(save_path)
-
     if file.filename.endswith('.pdf'):
-        text = extract_text_from_pdf(save_path)
+        content = extract_text_from_pdf(save_path)
     elif file.filename.endswith('.docx'):
-        text = extract_text_from_docx(save_path)
+        content = extract_text_from_docx(save_path)
     else:
-        return jsonify({"error": "Unsupported file format."}), 400
-
-    with open(PROFILE_PATH, "w", encoding="utf-8") as f:
-        f.write(text.strip())
-    return jsonify({"message": "Profile uploaded and saved."})
-
+        return jsonify({"error": "unsupported format"}), 400
+    doc_chunks = split_text(content)
+    doc_index = build_faiss_index(doc_chunks)
+    return jsonify({"message": "file uploaded"})
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    global chat_history
     data = request.json
-    user_prompt = data.get('prompt', '')
-    system_prompt = {"role": "system", "content": "You are a helpful assistant."}
+    query = data.get('prompt', '')
+    threshold = 0.3
+    used_chunks = []
+    used_sources = []
 
-    if not os.path.exists(PROFILE_PATH):
-        return jsonify({"error": "No user profile uploaded yet."}), 400
-    profile_text = open(PROFILE_PATH, encoding="utf-8").read()
+    if qa_index:
+        qa_retrieved, qa_score = retrieve_with_score(qa_index, qa_chunks, query)
+        if qa_score >= threshold:
+            used_chunks += qa_retrieved
+            used_sources.append('qa')
 
-    requirement_text, matched_prompt, score = retrieve_requirement_answer(user_prompt)
-    if requirement_text is None:
-        return jsonify({"response": "Sorry, I couldn't find matching program requirements to compare."})
+    if guide_index:
+        guide_retrieved, guide_score = retrieve_with_score(guide_index, guide_chunks, query)
+        if guide_score >= threshold:
+            used_chunks += guide_retrieved
+            used_sources.append('guide')
 
-    rag_prompt = build_compare_prompt(profile_text, requirement_text, user_prompt)
-    messages = [system_prompt, {"role": "user", "content": rag_prompt}]
+    if doc_index:
+        doc_retrieved, doc_score = retrieve_with_score(doc_index, doc_chunks, query)
+        if doc_score >= threshold:
+            used_chunks += doc_retrieved
+            used_sources.append('document')
+
+    if used_chunks:
+        prompt = build_prompt(used_chunks, query)
+    else:
+        prompt = query
+
+    messages = [{"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}]
 
     input_ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(model.device)
 
@@ -144,23 +169,16 @@ def chat():
             eos_token_id=tokenizer.eos_token_id
         )
 
-    answer = tokenizer.decode(outputs[0][input_ids.shape[-1]:], skip_special_tokens=True).strip()
-    return jsonify({
-        "response": answer,
-        "matched_prompt": matched_prompt,
-        "retrieval_score": float(score)
-    })
-
+    result = tokenizer.decode(outputs[0][input_ids.shape[-1]:], skip_special_tokens=True).strip()
+    return jsonify({"response": result, "sources": used_sources})
 
 @app.route('/api/reset', methods=['POST'])
-def reset_all():
-    global chat_history
-    chat_history = []
-    if os.path.exists(PROFILE_PATH):
-        os.remove(PROFILE_PATH)
-    return jsonify({"message": "Profile and chat reset."})
-
+def reset():
+    global doc_chunks, doc_index
+    doc_chunks, doc_index = [], None
+    return jsonify({"message": "reset"})
 
 if __name__ == "__main__":
-    load_qa_dataset_and_index(QA_PATH)
+    load_guide()
+    load_qa()
     app.run(host="0.0.0.0", port=5000)
