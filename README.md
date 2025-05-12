@@ -55,6 +55,8 @@ study-abroad-rag-system/
 
 This guide provides step-by-step instructions to set up and run the Study Abroad RAG System locally.
 
+The Python version we used for development is 3.10.16
+
 ### 1. Clone the Repository
 
 ```bash
