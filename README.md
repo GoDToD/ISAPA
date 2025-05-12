@@ -1,5 +1,5 @@
 
-# Study Abroad RAG System
+# LLM-Driven Study Aboard Consulting System
 
 This project is a document-augmented question answering system combining a React frontend with a Flask backend. It supports real-time conversational interaction with a local large language model (LLM), document upload and semantic retrieval, and integrates a study abroad encyclopedia along with a curated QA dataset to enhance answering capabilities.
 
@@ -21,28 +21,6 @@ This project is a document-augmented question answering system combining a React
 
 - **Multi-Source Knowledge Fusion**  
   Dynamically retrieves and fuses multiple knowledge sources to build a context-aware prompt, delivering highly relevant answers.
-
----
-
-## 🛠️ Technology Stack
-
-**Frontend**:
-- React
-- TypeScript
-- Axios
-- Vite (or Create React App)
-- LocalStorage (optional)
-
-**Backend**:
-- Flask
-- Flask-CORS
-- Huggingface Transformers
-- PyTorch
-- BitsAndBytes (4-bit quantization)
-- Sentence-Transformers
-- FAISS
-- pdfplumber (for PDF parsing)
-- python-docx (for Word parsing)
 
 ---
 
@@ -116,6 +94,7 @@ pip install -r requirements.txt
 Start the backend server:
 
 ```bash
+cd backend
 python app.py
 ```
 
