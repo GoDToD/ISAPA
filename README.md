@@ -1,5 +1,5 @@
 
-# LLM-Driven Study Aboard Consulting System
+# LLM-Driven Study Abroad Consulting System
 
 This project is a document-augmented question answering system combining a React frontend with a Flask backend. It supports real-time conversational interaction with a local large language model (LLM), document upload and semantic retrieval, and integrates a study abroad encyclopedia along with a curated QA dataset to enhance answering capabilities.
 
