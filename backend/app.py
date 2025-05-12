@@ -15,7 +15,6 @@ app = Flask(__name__)
 CORS(app)
 
 UPLOAD_FOLDER = 'uploads'
-PROFILE_PATH = os.path.join(UPLOAD_FOLDER, "user_profile.txt")
 GUIDE_PATH = './data/uk_study_guide.txt'
 QA_PATH = './data/reconverted_prompt_completion.jsonl'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -122,14 +121,38 @@ def upload_file():
     return jsonify({"message": "file uploaded"})
 
 @app.route('/api/chat', methods=['POST'])
+
 def chat():
+    import re
+    
     data = request.json
     query = data.get('prompt', '')
     threshold = 0.3
     used_chunks = []
     used_sources = []
 
-    if qa_index:
+    
+    # 优先级判断关键词
+    decision_keywords = ["requirement", "qualified", "eligibility", "can i apply", "suitable", "am i eligible", "fit the program"]
+    is_eligibility_question = any(kw in query.lower() for kw in decision_keywords)
+
+    # Always include uploaded user document content
+    if doc_chunks:
+        used_chunks += doc_chunks[:2]  # 拼接前两个块以节省上下文空间
+        used_sources.append('document')
+
+    if qa_index and (is_eligibility_question or not used_chunks):
+        qa_retrieved, qa_score = retrieve_with_score(qa_index, qa_chunks, query)
+        if qa_score >= 0.25:
+            used_chunks += qa_retrieved
+            used_sources.append('qa')
+
+    if guide_index and not is_eligibility_question:
+        guide_retrieved, guide_score = retrieve_with_score(guide_index, guide_chunks, query)
+        if guide_score >= 0.25:
+            used_chunks += guide_retrieved
+            used_sources.append('guide')
+
         qa_retrieved, qa_score = retrieve_with_score(qa_index, qa_chunks, query)
         if qa_score >= threshold:
             used_chunks += qa_retrieved
